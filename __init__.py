@@ -1,35 +1,23 @@
 # -*- coding: utf-8 -*-
 
+import re
 import sys
-from os.path import dirname, abspath, basename
-import subprocess
-
-from mycroft.skills.core import MycroftSkill
-from adapt.intent import IntentBuilder
-from mycroft.messagebus.message import Message
-
 import time
-import feedparser
-
-import os
+import unicodedata
+from html.parser import HTMLParser
+from os.path import abspath
 from os.path import dirname
-from mycroft.util.log import getLogger
 
+import feedparser
 from nltk import pos_tag
 from nltk.downloader import Downloader
-import re
-import unicodedata
-
-try:
-    # Python 2.6-2.7
-    from HTMLParser import HTMLParser
-except ImportError:
-    from html.parser import HTMLParser
+from ovos_utils.log import LOG
+from ovos_workshop.intents import IntentBuilder
+from ovos_workshop.skills import OVOSSkill
 
 html_parser = HTMLParser()
 sys.path.append(abspath(dirname(__file__)))
 
-logger = getLogger(abspath(__file__).split('/')[-2])
 __author__ = 'forslund'
 
 
@@ -78,9 +66,10 @@ def get_best_matching_title(items, utterance):
 ALT_NLTK_DATA = 'https://pastebin.com/raw/D3TBY4Mj'
 
 
-class RssSkill(MycroftSkill):
-    def __init__(self):
-        super(RssSkill, self).__init__('RssSkill')
+class RssSkill(OVOSSkill):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._is_reading_headlines = False
         self.feeds = {}
         self.cached_items = {}
@@ -88,14 +77,13 @@ class RssSkill(MycroftSkill):
         try:
             pos_tag('advance')
         except LookupError:
-            logger.debug('Tagger not installed... Trying to download')
+            LOG.debug('Tagger not installed... Trying to download')
             dler = Downloader()
             if not dler.download('averaged_perceptron_tagger'):
-                logger.debug('Trying alternative source...')
+                LOG.debug('Trying alternative source...')
                 dler = Downloader(ALT_NLTK_DATA)
                 dler.download('averaged_perceptron_tagger',
-                         raise_on_error=True)
-
+                              raise_on_error=True)
 
     def cache(self, title, items):
         """ Add items to cache and set a timestamp for the cache."""
@@ -103,15 +91,15 @@ class RssSkill(MycroftSkill):
         self.cache_time[title] = time.time()
 
     def initialize(self):
-        print self.settings.keys()
+        print(list(self.settings.keys()))
         for i in range(5):
             url_key = "url{}".format(i)
             alias_key = "alias{}".format(i)
             url = self.settings.get(url_key)
             alias = self.settings.get(alias_key)
-            print "loading from settings"
-            print url_key, alias_key
-            print alias, url
+            print("loading from settings")
+            print(url_key, alias_key)
+            print(alias, url)
             if url:
                 feed = feedparser.parse(url)
                 title = alias or feed['channel']['title']
@@ -119,29 +107,29 @@ class RssSkill(MycroftSkill):
                 self.cache(title, items)
 
                 title = replace_specials(title)
-                print 'Loaded {}'.format(title)
+                print('Loaded {}'.format(title))
                 self.feeds[title] = url
-                logger.info(title)
+                LOG.info(title)
                 self.register_vocabulary(title, 'TitleKeyword')
 
-        intent = IntentBuilder('rssIntent')\
-            .require('RssKeyword')\
+        intent = IntentBuilder('rssIntent') \
+            .require('RssKeyword') \
             .require('TitleKeyword') \
             .build()
         self.register_intent(intent, self.handle_headlines)
 
-        intent = IntentBuilder('readArticleIntent')\
-            .require('ReadKeyword')\
+        intent = IntentBuilder('readArticleIntent') \
+            .require('ReadKeyword') \
             .build()
         self.register_intent(intent, self.handle_read)
 
-        intent = IntentBuilder('readLatestIntent')\
-            .require('ReadKeyword')\
-            .require('LatestKeyword')\
-            .require('TitleKeyword')\
+        intent = IntentBuilder('readLatestIntent') \
+            .require('ReadKeyword') \
+            .require('LatestKeyword') \
+            .require('TitleKeyword') \
             .build()
         self.register_intent(intent, self.handle_read_latest)
-        logger.debug('Intialization done')
+        LOG.debug('Intialization done')
 
     def handle_headlines(self, message):
         """Speak the latest headlines from the selected feed."""
@@ -160,7 +148,7 @@ class RssSkill(MycroftSkill):
         for i in items:
             if not self._is_reading_headlines:
                 break
-            logger.info('Headline: ' + i['title'])
+            LOG.info('Headline: ' + i['title'])
             self.speak(i['title'])
             time.sleep(5)
         self._is_reading_headlines = False
@@ -175,10 +163,10 @@ class RssSkill(MycroftSkill):
 
         if name in self.cached_items \
                 and (time.time() - cached_time) < cache_timeout:
-            logger.debug('Using cached feed...')
+            LOG.debug('Using cached feed...')
             return self.cached_items[name]
         else:
-            logger.debug('Fetching feed and updating cache')
+            LOG.debug('Fetching feed and updating cache')
             feed = feedparser.parse(self.feeds[name])
             feed_items = feed.get('items', [])
             self.cache(name, feed_items)
@@ -199,7 +187,7 @@ class RssSkill(MycroftSkill):
             items += self.get_items(f)
         best_match = get_best_matching_title(items, utterance)
 
-        logger.debug("Reading " + best_match[1]['title'])
+        LOG.debug("Reading " + best_match[1]['title'])
         if best_match[0] != 0:
             self.speak(clean_html(best_match[1]['summary']))
 
@@ -210,8 +198,7 @@ class RssSkill(MycroftSkill):
         self.speak(clean_html(text))
 
     def stop(self):
-        self._is_reading_headlines = False
-
-
-def create_skill():
-    return RssSkill()
+        if self._is_reading_headlines:
+            self._is_reading_headlines = False
+            return True
+        return False
